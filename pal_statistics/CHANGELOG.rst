@@ -2,6 +2,13 @@
 Changelog for package pal_statistics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Use enabled\_.swap instead of std::swap.
+  This allows this package to compile on modern g++,
+  on Ubuntu 24.04.
+* Contributors: Chris Lalancette
+
 2.2.3 (2023-12-18)
 ------------------
 * Merge branch 'fix/flaky_macro_asyncPublisher' into 'humble-devel'
