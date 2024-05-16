@@ -2,8 +2,8 @@
 Changelog for package pal_statistics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.2.4 (2024-05-16)
+------------------
 * Use enabled\_.swap instead of std::swap.
   This allows this package to compile on modern g++,
   on Ubuntu 24.04.
