@@ -30,7 +30,8 @@
 
 
 from pal_statistics_msgs.msg import Statistic, Statistics, StatisticsNames, StatisticsValues
-import rospy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 
 class Registration:
@@ -45,22 +46,25 @@ class Registration:
         self.registry = registry
 
     def __del__(self):
-        rospy.logdebug('Unregistering ' + self.name)
+        self.registry.node.get_logger().debug('Unregistering ' + self.name)
         self.registry.unregister(self.name)
 
 
 class StatisticsRegistry:
 
-    def __init__(self, topic):
+    def __init__(self, topic, node: Node):
         self.topic = topic
+        self.node = node
         self.functions = {}
-        self.full_pub = rospy.Publisher(topic + '/full', Statistics, queue_size=1)
-        self.names_pub = rospy.Publisher(
-            topic + '/names',
-            StatisticsNames,
-            queue_size=1,
-            latch=True)
-        self.values_pub = rospy.Publisher(topic + '/values', StatisticsValues, queue_size=1)
+        latched_qos = QoSProfile(
+            depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        normal_qos = QoSProfile(depth=1)
+        self.full_pub = self.node.create_publisher(
+            Statistics, topic + '/full', qos_profile=normal_qos)
+        self.names_pub = self.node.create_publisher(
+            StatisticsNames, topic + '/names', qos_profile=latched_qos)
+        self.values_pub = self.node.create_publisher(
+            StatisticsValues, topic + '/values', qos_profile=normal_qos)
         self.names_changed = True
         self.last_names_version = 1
 
@@ -71,18 +75,19 @@ class StatisticsRegistry:
 
     def registerFunction(self, name, func, registration_list=None):
         """
-        Register a function to retrieve the value to be published.
+        Register a statistics function.
 
-        func will be called to read the value to be published when the publish() method is called.
+        Register a function that will be called to read the value to
+        be published when the publish() method is called.
 
         @param registration_list: If not None, will be extended to include a
-        Registration object for the registered function
+        Registration object for the registered function.
 
-        The function takes no arguments and returns a value convertable to float
-        It can also be used to register a variable using lambda
+        The function takes no arguments and returns a value convertable to float.
+        It can also be used to register a variable using lambda.
 
         registerFunction('my_function', self.my_function)
-        registerFunction('my_variable', (lambda: variable))
+        registerFunction('my_variable', (lambda: variable)).
         """
         self.functions[name] = func
         if registration_list is not None:
@@ -94,15 +99,15 @@ class StatisticsRegistry:
         try:
             self.functions.pop(name)
         except KeyError as e:
-            rospy.logerr('Error unregistering ' + name + e.what())
+            self.node.get_logger().error('Error unregistering ' + name + e.what())
         self.names_changed = True
 
     def publish(self):
-        if self.full_pub.get_num_connections() > 0:
+        if self.full_pub.get_subscription_count() > 0:
             self.full_pub.publish(self.createFullMsg())
 
         # When name changes, we need to publish to keep the latched topic in the latest version
-        if self.names_changed or self.values_pub.get_num_connections() > 0:
+        if self.names_changed or self.values_pub.get_subscription_count() > 0:
             names_msg, values_msg = self.createOptimizedMsgs()
             if names_msg:
                 self.names_pub.publish(names_msg)
@@ -112,7 +117,7 @@ class StatisticsRegistry:
     def publishCustomStatistic(self, name, value):
         """Publish a one-time statistic."""
         msg = Statistics()
-        msg.header.stamp = rospy.Time.now()
+        msg.header.stamp = self.node.get_clock().now().to_msg()
         s = Statistic()
         s.name = name
         s.value = value
@@ -126,8 +131,8 @@ class StatisticsRegistry:
     def createFullMsg(self):
         """Create and return a message after reading all registrations."""
         msg = Statistics()
-        msg.header.stamp = rospy.Time.now()
-        for name, func in self.functions.iteritems():
+        msg.header.stamp = self.node.get_clock().now().to_msg()
+        for name, func in self.functions.items():
             s = Statistic()
             s.name = name
             s.value = func()
@@ -137,7 +142,7 @@ class StatisticsRegistry:
     def createOptimizedMsgs(self):
         """Create and return a names, values message after reading all registrations."""
         values_msg = StatisticsValues()
-        values_msg.header.stamp = rospy.Time.now()
+        values_msg.header.stamp = self.node.get_clock().now().to_msg()
         if self.names_changed:
             names_msg = StatisticsNames()
             names_msg.header.stamp = values_msg.header.stamp
@@ -147,7 +152,7 @@ class StatisticsRegistry:
             names_msg = None
         values_msg.names_version = self.last_names_version
 
-        for name, func in self.functions.iteritems():
+        for name, func in self.functions.items():
             if names_msg:
                 names_msg.names.append(name)
             values_msg.values.append(func())
