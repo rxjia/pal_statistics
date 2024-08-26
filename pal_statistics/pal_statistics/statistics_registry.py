@@ -56,15 +56,11 @@ class StatisticsRegistry:
         self.topic = topic
         self.node = node
         self.functions = {}
-        latched_qos = QoSProfile(
-            depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
-        normal_qos = QoSProfile(depth=1)
-        self.full_pub = self.node.create_publisher(
-            Statistics, topic + '/full', qos_profile=normal_qos)
+        transient_local_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self.full_pub = self.node.create_publisher(Statistics, topic + '/full', 1)
         self.names_pub = self.node.create_publisher(
-            StatisticsNames, topic + '/names', qos_profile=latched_qos)
-        self.values_pub = self.node.create_publisher(
-            StatisticsValues, topic + '/values', qos_profile=normal_qos)
+            StatisticsNames, topic + '/names', qos_profile=transient_local_qos)
+        self.values_pub = self.node.create_publisher(StatisticsValues, topic + '/values', 1)
         self.names_changed = True
         self.last_names_version = 1
 
