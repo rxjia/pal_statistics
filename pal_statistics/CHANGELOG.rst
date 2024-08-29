@@ -2,8 +2,8 @@
 Changelog for package pal_statistics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
+2.3.1 (2024-08-29)
+------------------
 * Ensure the value is converted to float before creating the msg
 * Contributors: David ter Kuile
 
