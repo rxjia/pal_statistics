@@ -2,6 +2,11 @@
 Changelog for package pal_statistics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Ensure the value is converted to float before creating the msg
+* Contributors: David ter Kuile
+
 2.3.0 (2024-08-29)
 ------------------
 * Remove unused files
