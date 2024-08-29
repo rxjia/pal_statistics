@@ -131,7 +131,7 @@ class StatisticsRegistry:
         for name, func in self.functions.items():
             s = Statistic()
             s.name = name
-            s.value = func()
+            s.value = float(func())
             msg.statistics.append(s)
         return msg
 
