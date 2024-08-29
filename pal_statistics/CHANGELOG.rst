@@ -2,6 +2,14 @@
 Changelog for package pal_statistics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Remove unused files
+* update qos for ros2
+* Port test
+* Port statistics_registry.py
+* Contributors: David ter Kuile
+
 2.2.4 (2024-05-16)
 ------------------
 * Use enabled\_.swap instead of std::swap.
