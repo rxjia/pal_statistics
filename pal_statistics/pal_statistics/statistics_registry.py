@@ -29,6 +29,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 
+import threading
 from pal_statistics_msgs.msg import Statistic, Statistics, StatisticsNames, StatisticsValues
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
@@ -51,11 +52,12 @@ class Registration:
 
 
 class StatisticsRegistry:
-
     def __init__(self, topic, node: Node):
+        self._lock = threading.RLock()
         self.topic = topic
         self.node = node
         self.functions = {}
+        self.variables = {}
         transient_local_qos = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         self.full_pub = self.node.create_publisher(Statistics, topic + '/full', 1)
         self.names_pub = self.node.create_publisher(
@@ -64,10 +66,15 @@ class StatisticsRegistry:
         self.names_changed = True
         self.last_names_version = 1
 
-    # Python will copy the value of variables of simple types
-    # such as numbers, we cannot store them as such
-    # def registerVariable(self, name, variable):
-        # self.variables[name] = variable
+    def updateVariable(self, name, variable):
+        with self._lock:
+            if name in self.functions:
+                self.functions.pop(name)
+                self.names_changed = True
+                self.node.get_logger().warn(f"Variable {name} is being registered as a function")
+            elif name not in self.variables:
+                self.names_changed = True
+            self.variables[name] = variable
 
     def registerFunction(self, name, func, registration_list=None):
         """
@@ -85,30 +92,44 @@ class StatisticsRegistry:
         registerFunction('my_function', self.my_function)
         registerFunction('my_variable', (lambda: variable)).
         """
-        self.functions[name] = func
-        if registration_list is not None:
-            registration_list.append(Registration(name, self))
-        self.names_changed = True
+        with self._lock:
+            self.functions[name] = func
+            if registration_list is not None:
+                registration_list.append(Registration(name, self))
+            self.names_changed = True
 
     def unregister(self, name):
         """Unregister a function or variable so it's no longer read."""
-        try:
-            self.functions.pop(name)
-        except KeyError as e:
-            self.node.get_logger().error('Error unregistering ' + name + e.what())
-        self.names_changed = True
+        with self._lock:
+            ret = False
+            try:
+                self.functions.pop(name)
+                ret = True
+            except KeyError as e:
+                pass
+            if not ret:
+                try:
+                    self.variables.pop(name)
+                    ret = True
+                except KeyError as e:
+                    pass
+            if not ret:
+                self.node.get_logger().warn('Tried to unregister non-registered statistic: ' + name)
+            else:
+                self.names_changed = True
 
     def publish(self):
-        if self.full_pub.get_subscription_count() > 0:
-            self.full_pub.publish(self.createFullMsg())
-
-        # When name changes, we need to publish to keep the latched topic in the latest version
-        if self.names_changed or self.values_pub.get_subscription_count() > 0:
-            names_msg, values_msg = self.createOptimizedMsgs()
-            if names_msg:
-                self.names_pub.publish(names_msg)
-            if values_msg:
-                self.values_pub.publish(values_msg)
+        with self._lock:
+            if self.full_pub.get_subscription_count() > 0:
+                self.full_pub.publish(self.createFullMsg())
+            
+            # When name changes, we need to publish to keep the latched topic in the latest version
+            if self.names_changed or self.values_pub.get_subscription_count() > 0:
+                names_msg, values_msg = self.createOptimizedMsgs()
+                if names_msg:
+                    self.names_pub.publish(names_msg)
+                if values_msg:
+                    self.values_pub.publish(values_msg)
 
     def publishCustomStatistic(self, name, value):
         """Publish a one-time statistic."""
@@ -118,39 +139,55 @@ class StatisticsRegistry:
         s.name = name
         s.value = value
         msg.statistics.append(s)
-        self.full_pub.publish(msg)
+        with self._lock:
+            self.full_pub.publish(msg)
 
     def publishCustomStatistics(self, msg):
         """Publish a one-time statistics msg."""
-        self.full_pub.publish(msg)
+        with self._lock:
+            self.full_pub.publish(msg)
 
     def createFullMsg(self):
         """Create and return a message after reading all registrations."""
         msg = Statistics()
         msg.header.stamp = self.node.get_clock().now().to_msg()
-        for name, func in self.functions.items():
-            s = Statistic()
-            s.name = name
-            s.value = float(func())
-            msg.statistics.append(s)
-        return msg
+        with self._lock:
+            for name, func in self.functions.items():
+                s = Statistic()
+                s.name = name
+                s.value = float(func())
+                msg.statistics.append(s)
+            for name, func in self.variables.items():
+                s = Statistic()
+                s.name = name
+                s.value = float(func)
+                msg.statistics.append(s)
+            return msg
 
     def createOptimizedMsgs(self):
         """Create and return a names, values message after reading all registrations."""
-        values_msg = StatisticsValues()
-        values_msg.header.stamp = self.node.get_clock().now().to_msg()
-        if self.names_changed:
-            names_msg = StatisticsNames()
-            names_msg.header.stamp = values_msg.header.stamp
-            self.last_names_version += 1
-            names_msg.names_version = self.last_names_version
-        else:
-            names_msg = None
-        values_msg.names_version = self.last_names_version
+        with self._lock:
+            values_msg = StatisticsValues()
+            values_msg.header.stamp = self.node.get_clock().now().to_msg()
+            if self.names_changed:
+                names_msg = StatisticsNames()
+                names_msg.header.stamp = values_msg.header.stamp
+                self.last_names_version += 1
+                names_msg.names_version = self.last_names_version
+            else:
+                names_msg = None
+            values_msg.names_version = self.last_names_version
 
-        for name, func in self.functions.items():
-            if names_msg:
-                names_msg.names.append(name)
-            values_msg.values.append(func())
-        self.names_changed = False
-        return names_msg, values_msg
+            for name, func in self.functions.items():
+                if names_msg:
+                    names_msg.names.append(name)
+                value = float(func())
+                values_msg.values.append(value)
+
+            for name, func in self.variables.items():
+                if names_msg:
+                    names_msg.names.append(name)
+                value = float(func)
+                values_msg.values.append(value)
+            self.names_changed = False
+            return names_msg, values_msg
